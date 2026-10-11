@@ -178,7 +178,7 @@ transformer stage.
 | `--weights-int8` | off | with `--low-vram`: int8 per-row weights, dequantized on the GPU before use; halves host memory / disk traffic, changes the samples (see below) |
 | `--weights-cache` | `~/.cache/dmad_h3/...` | with `--weights-int8` and without `--weights-in-ram`: where the int8 copy is written once (18 GB) |
 | `--chunk-rows` | by GPU size | with `--low-vram`: the transformer blocks run at most this many rows of the packed sequence at a time (queries per chunk; only k and v at full length); `0` turns it off |
-| `--vae-offload` | by GPU size | with `--low-vram`: stream the video VAE from host memory during the decode (~9 GB less GPU memory, 1–1.5 min slower); `auto` does it only when less than 13 GiB is free at decode time, `on` / `off` force it; same output either way |
+| `--vae-offload` | by GPU size | with `--low-vram`: stream the video VAE from host memory during the decode (~9 GB less GPU memory, 1–1.5 min slower); `auto` does it only when the GPU lacks the ~12 GiB to keep it resident at decode time, `on` / `off` force it; same output either way |
 | `--vae-dtype` | fp32 | `bf16` decodes the video about twice as fast at ~42 dB PSNR to the fp32 decode (audio VAE always fp32) |
 
 **Prompts.** MiniMax-H3 was trained on long, structured descriptions (an `integrated_multimodal_description:` shot
@@ -202,7 +202,7 @@ python inference.py --model-dir models/MiniMax-H3 --lora ckpt/minimax_h3/dmad_mi
 |---|---|---|---|
 | 8 GB | `8` | 5 s (124 frames) | 8192-row chunks, video VAE streamed from host memory during the decode |
 | 12 GB | `12` | 15 s (362 frames) | as for 8 GB |
-| 16 GB | `16` | 15 s | 16384-row chunks; the video VAE stays on the GPU when 13 GiB is free at decode time (decode 1–1.5 min faster) |
+| 16 GB | `16` | 15 s | 16384-row chunks; the video VAE stays on the GPU when it fits (about 12 GiB free at decode time) (decode 1–1.5 min faster) |
 | 24 GB and up | `24` | 15 s | 16384-row chunks, video VAE on the GPU |
 
 Every size makes the same video, bit for bit; only memory and speed differ. Without a number the size is picked from

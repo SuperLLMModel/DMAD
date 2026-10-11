@@ -89,8 +89,8 @@ def parse_args():
                         "12288 and 8192.")
     p.add_argument("--vae-offload", choices=["auto", "on", "off"],
                    help="With --low-vram: keep the video VAE in host memory and stream it to the GPU layer by layer "
-                        "during the decode (~9 GB less GPU memory, decode 1-1.5 min slower). auto: only when less than "
-                        "13 GiB of GPU memory is free at decode time. Default: set by the --low-vram size; same "
+                        "during the decode (~9 GB less GPU memory, decode 1-1.5 min slower). auto: only when the GPU does "
+                        "not have the memory to keep it resident at decode time (~12 GiB). Default: set by the --low-vram size; same "
                         "output either way.")
     p.add_argument("--vae-dtype", choices=["fp32", "bf16"], default="fp32",
                    help="Precision of the video VAE decode (fp32 as released; bf16 is about twice as fast and "
@@ -203,11 +203,13 @@ def main():
 
     # 3. decode + mux
     vae_dtype = {"fp32": torch.float32, "bf16": torch.bfloat16}[args.vae_dtype]
-    free = torch.cuda.mem_get_info(device)[0] / 2**30  # the resident decode peaks at 12.7 GiB
-    offload = bool(args.low_vram) and (args.vae_offload == "on" or args.vae_offload == "auto" and free < 13.0)
+    # the resident decode peaks at 12.7 GiB allocated (what is allocated now included); keep 0.5 GiB of margin
+    free = torch.cuda.mem_get_info(device)[0] / 2**30
+    need = 12.7 - torch.cuda.memory_allocated(device) / 2**30 + 0.5
+    offload = bool(args.low_vram) and (args.vae_offload == "on" or args.vae_offload == "auto" and free < need)
     if args.low_vram:
         log(f"video VAE {'streamed from host memory' if offload else 'resident on the GPU'} for the decode "
-            f"({free:.1f} GiB free)")
+            f"({free:.1f} GiB free, {need:.1f} GiB needed to keep it resident)")
     vae, audio_vae = load_vaes(args.model_dir, device, decoder_only=bool(args.low_vram), dtype=vae_dtype, offload=offload)
     for i, ((video_rows, audio_rows), prompt) in enumerate(zip(rows, prompts)):
         frames, wav = decode_rows(vae, audio_vae, video_rows, audio_rows, shape, geometry, stream_frames=bool(args.low_vram),
