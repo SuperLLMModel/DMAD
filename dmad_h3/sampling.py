@@ -139,10 +139,11 @@ def _decode_to_frames(vae, z, to_frames):
 
 
 @torch.no_grad()
-def decode_rows(vae, audio_vae, video_rows, audio_rows, shape, geometry, stream_frames=False):
+def decode_rows(vae, audio_vae, video_rows, audio_rows, shape, geometry, stream_frames=False, device=None):
     """Packed latent rows -> (uint8 frames [T, H, W, 3], float32 waveform [N, 2]). `stream_frames` decodes clip by
     clip into host memory (`_decode_to_frames`): same frames, a fraction of the GPU memory for long videos."""
-    device, vae_dtype = next(vae.parameters()).device, next(vae.parameters()).dtype
+    vae_dtype = next(vae.parameters()).dtype
+    device = device or next(vae.parameters()).device  # pass it when the VAEs are offloaded (their weights live on the CPU)
     vm = torch.tensor(vae.config.latents_mean, device=device).view(1, -1, 1, 1, 1)
     vs = torch.tensor(vae.config.latents_std, device=device).view(1, -1, 1, 1, 1)
     am = torch.tensor(audio_vae.config.latents_mean, device=device).view(1, -1, 1)

@@ -10,7 +10,8 @@ and the same op order, only *where the weights live* differs.
 * The transformer's AdaLN projections (13B of its 33B parameters) depend only on the sampling step, so their outputs
   are computed once per step up front and the projections are replaced by table lookups; the per-step stream is then
   0.69 GB per block (35 GB per model evaluation) instead of 1.3 GB.
-* Everything else stays resident: token refiner, embedders, output heads, time embedder, the LoRA.
+* Everything else stays resident: embedders, output heads, time embedder, the LoRA; the token refiner sees only the
+  text, so its output is computed once per prompt (`precompute_text`) and its weights are dropped.
 * Optionally (`chunk_rows`) the transformer blocks run row-chunked for long videos, see `_chunked_block_forward`.
 """
 
@@ -413,11 +414,10 @@ class AdaLNTables(nn.Module):
 
 
 def _chunked_block_forward(block, rows):
-    """A `MiniMaxH3TransformerBlock.forward` that holds at most `rows` rows of every intermediate except q, k, v and
-    the attention output. Everything but the attention itself is per row (norms, AdaLN modulation, projections,
-    rotary, feed-forward), so those run chunk by chunk and the residual stream is updated in place; the attention
-    still sees the whole sequence. Same ops and dtypes as the stock forward, but the matmuls run on smaller matrices,
-    so results can differ from it in the last bits. Before q, k, v are allocated the allocator's free cached segments
+    """A `MiniMaxH3TransformerBlock.forward` that holds at most `rows` rows of every intermediate except k and v.
+    Everything but the attention itself is per row (norms, AdaLN modulation, projections, rotary, feed-forward), so
+    those run chunk by chunk and the residual stream is updated in place; the attention still sees the whole sequence. Same ops and dtypes as the stock forward, but the matmuls run on smaller matrices,
+    so results can differ from it in the last bits. Before k, v are allocated the allocator's free cached segments
     are released, so allocators without `expandable_segments` (Windows) find the room unfragmented."""
     from diffusers.models.attention_dispatch import dispatch_attention_fn
     from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
@@ -431,18 +431,22 @@ def _chunked_block_forward(block, rows):
         size = -(-n // -(-n // rows))  # equal chunks of at most `rows` (no small tail chunk with its own matmul kernel)
         spans = [(s, min(s + size, n)) for s in range(0, n, size)]
         torch.cuda.empty_cache()
-        q, k, v = (hidden_states.new_empty(hidden_states.shape[0], n, attn.heads, attn.head_dim) for _ in range(3))
-        for s, e in spans:
+        k, v = (hidden_states.new_empty(hidden_states.shape[0], n, attn.heads, attn.head_dim) for _ in range(2))
+
+        def modulated(s, e):  # norm1 + AdaLN of rows s:e (the same ops whenever it is recomputed)
             idx = adaln_indices[s:e]
-            x = block.norm1(hidden_states[:, s:e]) * (1.0 + scale_msa.index_select(0, idx)) + shift_msa.index_select(0, idx)
-            q[:, s:e] = _apply_rotary_emb(attn.norm_q(attn.to_q(x).unflatten(-1, (attn.heads, -1))), cos[s:e], sin[s:e])
+            return block.norm1(hidden_states[:, s:e]) * (1.0 + scale_msa.index_select(0, idx)) + shift_msa.index_select(0, idx)
+
+        for s, e in spans:
+            x = modulated(s, e)
             k[:, s:e] = _apply_rotary_emb(attn.norm_k(attn.to_k(x).unflatten(-1, (attn.heads, -1))), cos[s:e], sin[s:e])
             v[:, s:e] = attn.to_v(x).unflatten(-1, (attn.heads, -1))
-        # every query row attends to the full k / v independently, so the attention runs per chunk of queries and
-        # its output is projected and added to the residual stream right away (q, k, v already hold every row)
+        # every query row attends to the full k / v independently, so the queries of a chunk are computed right before
+        # its attention (from rows not yet updated) and the output is projected and added to the residual stream at once
         for s, e in spans:
             idx = adaln_indices[s:e]
-            out = dispatch_attention_fn(q[:, s:e], k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False,
+            q = _apply_rotary_emb(attn.norm_q(attn.to_q(modulated(s, e)).unflatten(-1, (attn.heads, -1))), cos[s:e], sin[s:e])
+            out = dispatch_attention_fn(q, k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False,
                                         backend=attn.processor._attention_backend,
                                         parallel_config=attn.processor._parallel_config)
             hidden_states[:, s:e] = hidden_states[:, s:e] + gate_msa.index_select(0, idx) * attn.to_out[0](out.flatten(2, 3))
@@ -455,6 +459,20 @@ def _chunked_block_forward(block, rows):
         return hidden_states
 
     return forward
+
+
+class TextLookup(nn.Module):
+    """Stands in for the token refiner: returns the output computed for exactly this input by `precompute_text`."""
+
+    def __init__(self, inputs, outputs):
+        super().__init__()
+        self.inputs, self.outputs = inputs, outputs
+
+    def forward(self, x):
+        for known, out in zip(self.inputs, self.outputs):
+            if known.shape == x.shape and torch.equal(known, x):
+                return out
+        raise RuntimeError("text not among the precomputed token-refiner inputs; pass every prompt to precompute_text")
 
 
 class LowMemTransformer:
@@ -537,6 +555,18 @@ class LowMemTransformer:
             tables = [torch.stack(proj(temb)) for temb in tembs]
             block.adaln_proj = AdaLNTables(tembs, tables)  # the projection's weights are dropped with `proj`
         del proj
+
+    @torch.no_grad()
+    def precompute_text(self, prompt_embeds):
+        """The context embedder and the token refiner see only the text (no timestep), so their output is the same at
+        every step: compute it once per prompt with the same ops as the forward, then replace the refiner by a lookup
+        and drop its weights (2 blocks, ~1.5 GB)."""
+        from diffusers.models.modeling_utils import get_parameter_dtype
+
+        m = self.model
+        inputs = [m.context_embedder(pe.to(get_parameter_dtype(m.context_embedder))) for pe in prompt_embeds]
+        m.token_refiner = TextLookup(inputs, [m.token_refiner(x) for x in inputs])
+        torch.cuda.empty_cache()
 
     def close(self):
         self.streamer.close()

@@ -54,16 +54,24 @@ def load_transformer(path, dtype=torch.bfloat16):
     return transformer
 
 
-def load_vaes(model_dir, device, decoder_only=False, dtype=torch.float32):
+def load_vaes(model_dir, device, decoder_only=False, dtype=torch.float32, offload=False):
     """The video and audio VAEs on `device`. `dtype` is the video VAE's precision (float32 as released, the precision
     of every result; bfloat16 decodes about twice as fast at ~42 dB PSNR to the float32 decode); the small audio VAE
-    always stays float32. `decoder_only` drops the video encoder (0.7 GB), which text-to-video never calls."""
+    always stays float32. `decoder_only` drops the video encoder (0.7 GB), which text-to-video never calls. `offload`
+    keeps the video VAE in host memory and streams each layer's weights to `device` right before it runs (diffusers
+    group offload): same weights and ops, ~9 GB less GPU memory for the decode."""
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
 
     root = Path(model_dir).expanduser().resolve()
     vae = AutoencoderKLMiniMaxH3.from_pretrained(str(root / "vae"), local_files_only=True).eval()
     if decoder_only:
         vae.encoder = None
-    vae.to(device=device, dtype=dtype)
-    audio_vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(str(root / "audio_vae"), local_files_only=True).eval().to(device)
+    audio_vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(str(root / "audio_vae"), local_files_only=True).eval()
+    if offload:  # the audio VAE (0.6 GB, weight-normed convs) stays resident
+        vae.to(dtype=dtype)
+        vae.enable_group_offload(onload_device=device, offload_device=torch.device("cpu"), offload_type="leaf_level",
+                                 use_stream=True)
+    else:
+        vae.to(device=device, dtype=dtype)
+    audio_vae.to(device)
     return vae, audio_vae

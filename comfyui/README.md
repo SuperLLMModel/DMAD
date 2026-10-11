@@ -31,12 +31,21 @@ partition; the students were trained on the text-to-audio-video transformer, see
 
 <a id="ready-to-run-workflows-24-gb-gpu"></a>
 
-## Ready-to-run workflows (16 GB GPU and up)
+## Ready-to-run workflows (8 GB GPU and up)
 
-Two complete text-to-audio-video workflows in [`workflows`](workflows/) that make 15 s of 1344x768 video
-with stereo audio on a 16 GB GPU or larger. Load the `.json`, or drag the example `.mp4` (on the Hugging Face repo; it embeds the
-workflow) into ComfyUI; missing models are offered for download from links stored in the workflow. Both sample with
+Complete text-to-audio-video workflows in [`workflows`](workflows/): two that make 15 s of 1344x768 video
+with stereo audio on a 16 GB GPU or larger, and a 5 s one for 8 GB GPUs. Load the `.json`, or drag the example `.mp4` (on the Hugging Face repo; it embeds the
+workflow) into ComfyUI; missing models are offered for download from links stored in the workflow. All sample with
 stock nodes (`lcm` + `simple`, `full_critic` LoRA); the ComfyUI-DMAD nodes are not needed.
+
+| GPU | workflow | video |
+|---|---|---|
+| 24 GB | [`dmad_h3_4step_15s_podcast.json`](workflows/dmad_h3_4step_15s_podcast.json) (4 steps) or [`dmad_h3_8step_15s_wok.json`](workflows/dmad_h3_8step_15s_wok.json) (8 steps) | 15 s |
+| 16 GB, 22 GB | the same two workflows, unchanged ([details](#16-gb-and-22-gb-gpus)) | 15 s |
+| 8 GB | [`dmad_h3_4step_5s_8gb_guitar.json`](workflows/dmad_h3_4step_5s_8gb_guitar.json) ([details](#8-gb-gpus-5-s)) | 5 s |
+
+The 24 GB and 16 GB rows share the workflow files: ComfyUI keeps as much of the model on the GPU as fits and streams
+the rest from system memory, so the same workflow adapts to the card (and gives the same video).
 
 | | 4 steps | 8 steps |
 |---|---|---|
@@ -65,12 +74,41 @@ ComfyUI-Manager), which both workflows include. Without it, 5 s (length 124) fit
 the one made with the memory node. Times are end to end (model loading, text encoding, sampling, decoding) on an H200
 with the PyTorch allocator capped at 24 or 14 GiB; a consumer GPU is slower, and sampling time scales linearly with steps.
 
+<a id="16-gb-and-22-gb-gpus"></a>
+
 **16 GB and 22 GB GPUs.** The workflows need no changes: with the GPU memory capped at 14 GiB (room for a 16 GB
 card's desktop and CUDA context) ComfyUI's dynamic VRAM keeps less of the model resident and streams more of it from
 system memory, and the videos are bit-identical to the 24 GiB runs (15 s with the memory node, and 5 s with stock
 nodes only, 126 s for 4 steps). What grows is system memory: about 46 GiB in use, so 64 GB of RAM is recommended.
 GPUs without native bf16 (RTX 20 series and older) run the bf16 math emulated, which is much slower; we have not
 measured them.
+
+<a id="8-gb-gpus-5-s"></a>
+
+## 8 GB GPUs (5 s)
+
+[`dmad_h3_4step_5s_8gb_guitar.json`](workflows/dmad_h3_4step_5s_8gb_guitar.json) is the 4-step workflow set up for
+8 GB GPUs: 5 s instead of 15 s, the `H3 Memory Optimization` node in its lowest-memory setting (`Attention memory mode`
+Lower VRAM (slower), `Activation chunk rows` 1024), and the `H3 AIMDO Residency Limiter` node of the same
+[H3-Optimizations](https://github.com/Zironic/H3-Optimizations) pack (`VBAR residency budget` 0 blocks), which streams
+every transformer block from system memory instead of keeping some resident. Models and sampling are the same as above.
+
+| | 4 steps, 5 s |
+|---|---|
+| Workflow | [`dmad_h3_4step_5s_8gb_guitar.json`](workflows/dmad_h3_4step_5s_8gb_guitar.json) |
+| Example (workflow embedded) | [`dmad_h3_4step_5s_8gb_guitar.mp4`](https://huggingface.co/ZhengmingYu/DMAD/resolve/main/minimax_h3/workflows/dmad_h3_4step_5s_8gb_guitar.mp4), seed 1 |
+| Output | 1344x768, 124 frames = 5 s at 24 fps, stereo audio |
+| Peak GPU memory, 7 GiB cap (8 GB GPUs) | 7.7 GiB |
+| Peak GPU memory, 5 GiB cap | 5.9 GiB |
+| Time (either cap) | about 210 s, of which sampling 152 s |
+
+![The 8 GB workflow in ComfyUI](workflows/screenshot_4step_5s_8gb.png)
+
+The video is the same at both caps, bit for bit. Measured like the table above (H200, allocator capped); the peaks
+include memory ComfyUI's dynamic VRAM allocates outside the PyTorch allocator, which is why they exceed the cap.
+System memory in use is about 45 GiB (64 GB of RAM recommended). The memory settings change the attention arithmetic, so
+the same prompt and seed do not reproduce the video the 16 GB+ settings make. 15 s does not fit in
+8 GB; use the 15 s workflows on a 16 GB GPU or larger.
 
 ## Workflow (text-to-audio-video)
 
