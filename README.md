@@ -5,6 +5,8 @@
 [![Project Page](https://img.shields.io/badge/Project-Page-yellow?logo=googlechrome&logoColor=yellow)](https://yzmblog.github.io/projects/DMAD/)
 [![Paper](https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=red)](https://arxiv.org/abs/2610.02188)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-DMAD-blue)](https://huggingface.co/ZhengmingYu/DMAD)
+[![ModelScope](https://img.shields.io/badge/ModelScope-DMAD-624aff?logo=modelscope)](https://modelscope.ai/models/ZhengmingYu-Community/DMAD)
+[![ModelScope CN](https://img.shields.io/badge/ModelScope_CN-DMAD-624aff?logo=modelscope)](https://modelscope.cn/models/ZhengmingYu-Community/DMAD)
 [![Demo Video](https://img.shields.io/badge/Demo-Video-red?logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=cOCUCYZzAtE)
 
 [Zhengming Yu](https://yzmblog.github.io/)<sup>1,2</sup>,
