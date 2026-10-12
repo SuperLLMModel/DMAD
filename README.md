@@ -314,13 +314,11 @@ started from and has its own README with the environment, data preparation, trai
 ## 📚 Citation
 
 ```bibtex
-@misc{yu2026dmad,
-  title         = {DMAD: Distribution Matching as Adversarial Distillation for Fast Visual Generation},
-  author        = {Zhengming Yu and Junkun Yuan and Haotian Yang and Gordon Guocheng Qian and Yizhi Wang and
-                   Angtian Wang and Yiding Yang and Bo Liu and Xin Li and Wenping Wang and Chongyang Ma},
-  year          = {2026},
-  eprint        = {2610.02188},
-  archivePrefix = {arXiv}
+@article{yu2026dmad,
+  title={DMAD: Distribution Matching as Adversarial Distillation for Fast Visual Generation},
+  author={Yu, Zhengming and Yuan, Junkun and Yang, Haotian and Qian, Gordon Guocheng and Wang, Yizhi and Wang, Angtian and Yang, Yiding and Liu, Bo and Li, Xin and Wang, Wenping and Ma, Chongyang},
+  journal={arXiv preprint arXiv:2610.02188},
+  year={2026}
 }
 ```
 
